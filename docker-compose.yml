@@ -1,0 +1,41 @@
+services:
+  glm53:
+    build: .
+    image: glm53-flash-170hx:pp5
+    container_name: glm53-pp5
+    # All GPUs via CDI (podman) — with docker + nvidia-container-toolkit use
+    # gpus: all instead of the device mapping below.
+    devices:
+      - nvidia.com/gpu=all
+    network_mode: host
+    shm_size: "16g"
+    cap_add:
+      - IPC_OWNER
+    environment:
+      - HF_HUB_OFFLINE=1
+      - VLLM_WORKER_MULTIPROC_METHOD=spawn
+      # Serialized loading + eager reads: full load takes ~20 min.
+      - VLLM_ENGINE_READY_TIMEOUT_S=7200
+      - VLLM_HTTP_TIMEOUT_KEEP_ALIVE=600
+      - NCCL_P2P_DISABLE=1
+      - VLLM_MARLIN_LOCK=/dev/shm/marlin_prep.lock
+      - VLLM_WORKER_INIT_STAGGER_S=15
+      - VLLM_MARLIN_SCALES_ON_CPU=1
+      - TORCH_SHOW_CPP_STACKTRACES=1
+    volumes:
+      # Adjust to wherever the 191 GiB model lives:
+      - /models/GLM-5.3-Flash-nvfp4:/model:ro
+      # Dense-MLA config overlay (index_topk=null) — must sit on top of the
+      # model directory:
+      - ./overrides/overlay/config.json:/model/config.json:ro
+    command: >
+      /model
+      --served-model-name glm53flash
+      --port 8000
+      --pipeline-parallel-size 5
+      --moe-backend humming
+      --max-model-len 32768
+      --safetensors-load-strategy eager
+      --gpu-memory-utilization 0.90
+      --max-num-seqs 64
+    restart: on-failure

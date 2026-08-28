@@ -92,10 +92,13 @@ curl http://localhost:8000/v1/chat/completions -H 'Content-Type: application/jso
   only 11 attention layers carry latent KV). Caveat: with dense attention,
   huge prompts prefill for hours (chunked at 8192 tok/step) and decode slows
   to a crawl near the ceiling. Drop to 262144 for a saner operating range.
-- `--reasoning-parser glm47` — the chat template auto-opens `<think>` and the
-  model always reasons first; this routes it to `reasoning_content` instead of
-  polluting `content` (the glm47 parser starts in REASONING state and switches
-  on `</think>` — exactly this convention). The template also accepts a
+- `--reasoning-parser deepseek_r1` — the chat template auto-opens `<think>`
+  and the model always reasons first; this routes thinking to
+  `reasoning_content`. Use **deepseek_r1, not glm47**: this fork's glm47
+  reasoning adapter never emits `reasoning_content` and silently drops
+  unterminated thinking on truncation (both streaming and non-streaming),
+  while the R1 parser explicitly handles output that starts already inside
+  `<think>` (opening tag supplied by the prompt). The template also accepts a
   `reasoning_effort` chat kwarg (low/high/max, default max).
 - `--gpu-memory-utilization 0.92`, `--max-num-seqs 64`.
 - `--enable-auto-tool-choice --tool-call-parser glm47` — required by agent

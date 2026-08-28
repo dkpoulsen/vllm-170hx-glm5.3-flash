@@ -60,7 +60,7 @@ exec "$ENGINE" run -d \
     --pipeline-parallel-size 5 \
     --moe-backend humming \
     --max-model-len 1048576 \
-    --reasoning-parser glm47 \
+    --reasoning-parser deepseek_r1 \
     --safetensors-load-strategy eager \
     --gpu-memory-utilization 0.92 \
     --max-num-seqs 64 \

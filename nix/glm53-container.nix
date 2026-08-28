@@ -74,7 +74,7 @@
         # Split the model's always-on thinking (template auto-opens <think>)
         # into reasoning_content. glm47 parser starts in REASONING state and
         # switches on </think> — matches this template exactly.
-        "--reasoning-parser glm47"
+        "--reasoning-parser deepseek_r1"
         "--gpu-memory-utilization 0.92"
         "--max-num-seqs 64"
         # Agent harnesses send tool_choice=auto — rejected without these.

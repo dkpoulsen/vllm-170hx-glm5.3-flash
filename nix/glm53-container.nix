@@ -70,6 +70,11 @@
         "--safetensors-load-strategy eager"
         "--gpu-memory-utilization 0.90"
         "--max-num-seqs 64"
+        # Agent harnesses send tool_choice=auto — rejected without these.
+        # glm47 = Glm47MoeModelToolParser, the GLM-family tool format in this
+        # fork (registered as glm45/glm47).
+        "--enable-auto-tool-choice"
+        "--tool-call-parser glm47"
       ];
       ExecStop = "${pkgs.podman}/bin/podman stop --ignore -t 10 --cidfile=/run/glm53-serve.ctr-id";
       ExecStopPost = "${pkgs.podman}/bin/podman rm -f --ignore -t 10 --cidfile=/run/glm53-serve.ctr-id";

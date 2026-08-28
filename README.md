@@ -89,6 +89,10 @@ curl http://localhost:8000/v1/chat/completions -H 'Content-Type: application/jso
   costs ~5 s/shard.
 - `--pipeline-parallel-size 5` — 45 decoder layers → 9 per rank.
 - `--max-model-len 32768`, `--max-num-seqs 64`, `--gpu-memory-utilization 0.90`.
+- `--enable-auto-tool-choice --tool-call-parser glm47` — required by agent
+  harnesses sending `tool_choice: "auto"`; `glm47` is the GLM-family parser
+  in this image (registered as `glm45`/`glm47`). If tool calls come out
+  malformed, compare the model's actual markup against the parser.
 - No MTP/speculative decoding: the model's nextn draft layer (layer 45) is
   skipped at load (`speculative_config=None`).
 

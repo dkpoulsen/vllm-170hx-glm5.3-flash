@@ -62,7 +62,9 @@ exec "$ENGINE" run -d \
     --max-model-len 32768 \
     --safetensors-load-strategy eager \
     --gpu-memory-utilization 0.90 \
-    --max-num-seqs 64
+    --max-num-seqs 64 \
+    --enable-auto-tool-choice \
+    --tool-call-parser glm47
 
 echo "container: ${CONTAINER_NAME} — follow: ${ENGINE} logs -f ${CONTAINER_NAME}"
 echo "first load takes ~20 min (serialized per-rank loading); ready line:"

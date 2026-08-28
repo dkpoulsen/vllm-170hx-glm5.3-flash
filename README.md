@@ -88,7 +88,16 @@ curl http://localhost:8000/v1/chat/completions -H 'Content-Type: application/jso
 - `--safetensors-load-strategy eager` — avoids mmap reads (BTRFS corruption);
   costs ~5 s/shard.
 - `--pipeline-parallel-size 5` — 45 decoder layers → 9 per rank.
-- `--max-model-len 32768`, `--max-num-seqs 64`, `--gpu-memory-utilization 0.90`.
+- `--max-model-len 1048576` — the model's true maximum (1M, MLA is compact:
+  only 11 attention layers carry latent KV). Caveat: with dense attention,
+  huge prompts prefill for hours (chunked at 8192 tok/step) and decode slows
+  to a crawl near the ceiling. Drop to 262144 for a saner operating range.
+- `--reasoning-parser glm47` — the chat template auto-opens `<think>` and the
+  model always reasons first; this routes it to `reasoning_content` instead of
+  polluting `content` (the glm47 parser starts in REASONING state and switches
+  on `</think>` — exactly this convention). The template also accepts a
+  `reasoning_effort` chat kwarg (low/high/max, default max).
+- `--gpu-memory-utilization 0.92`, `--max-num-seqs 64`.
 - `--enable-auto-tool-choice --tool-call-parser glm47` — required by agent
   harnesses sending `tool_choice: "auto"`; `glm47` is the GLM-family parser
   in this image (registered as `glm45`/`glm47`). If tool calls come out

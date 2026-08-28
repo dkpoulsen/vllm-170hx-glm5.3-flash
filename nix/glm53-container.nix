@@ -66,9 +66,16 @@
         "--port 8000"
         "--pipeline-parallel-size 5"
         "--moe-backend humming"
-        "--max-model-len 32768"
         "--safetensors-load-strategy eager"
-        "--gpu-memory-utilization 0.90"
+        # 1M = max_position_embeddings of the model (true maximum). Dense
+        # attention: prefill of huge prompts is slow (chunked at 8192 tok/step)
+        # and decode slows near the ceiling.
+        "--max-model-len 1048576"
+        # Split the model's always-on thinking (template auto-opens <think>)
+        # into reasoning_content. glm47 parser starts in REASONING state and
+        # switches on </think> — matches this template exactly.
+        "--reasoning-parser glm47"
+        "--gpu-memory-utilization 0.92"
         "--max-num-seqs 64"
         # Agent harnesses send tool_choice=auto — rejected without these.
         # glm47 = Glm47MoeModelToolParser, the GLM-family tool format in this

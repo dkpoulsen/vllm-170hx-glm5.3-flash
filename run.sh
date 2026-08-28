@@ -59,9 +59,10 @@ exec "$ENGINE" run -d \
     --port 8000 \
     --pipeline-parallel-size 5 \
     --moe-backend humming \
-    --max-model-len 32768 \
+    --max-model-len 1048576 \
+    --reasoning-parser glm47 \
     --safetensors-load-strategy eager \
-    --gpu-memory-utilization 0.90 \
+    --gpu-memory-utilization 0.92 \
     --max-num-seqs 64 \
     --enable-auto-tool-choice \
     --tool-call-parser glm47

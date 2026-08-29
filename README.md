@@ -89,7 +89,7 @@ curl http://localhost:8000/v1/chat/completions -H 'Content-Type: application/jso
 - `--safetensors-load-strategy eager` — avoids mmap reads (BTRFS corruption);
   costs ~5 s/shard.
 - `--pipeline-parallel-size 5` — 45 decoder layers → 9 per rank.
-- `--max-model-len 262144` — the working ceiling (2^18). Two int32-overflow walls exist above it: (1) the KDA/FLA chunk kernels (`token*8192` offsets) — **patched** in `overrides/fla/`, probes pass at 270k; (2) an unidentified site on the last PP rank (Xid 31 OOB write during a ~323k-token prefill) — unpatched. Cap stays at 262144 until wall 2 is found. (Model max is 1M; MLA is compact:
+- `--max-model-len 131072` — the safe ceiling (2^17). Two int32-overflow walls exist above it: (1) the KDA/FLA chunk kernels (`token*8192` offsets) — **patched** in `overrides/fla/`, probes pass at 270k; (2) an unidentified site on the last PP rank (Xid 31 OOB write during a ~323k-token prefill) — unpatched. Cap stays at 262144 until wall 2 is found. (Model max is 1M; MLA is compact:
   only 11 attention layers carry latent KV). Caveat: with dense attention,
   huge prompts prefill for hours (chunked at 8192 tok/step) and decode slows
   to a crawl near the ceiling. Drop to 262144 for a saner operating range.

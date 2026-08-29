@@ -73,3 +73,16 @@ crashed ~90 s into a ~323k-token prefill request:
   `offsets/block_shape` int32 while strides/bases may be int64).
 - Working posture: `--max-model-len 262144` (below both walls; wall 1
   patched anyway). Each in-engine failure costs a host reboot (driver wedge).
+
+## Wall 2 — refined (2026-08-29, second occurrence)
+
+Crash recurred BELOW the 262144 cap: Xid 31 OOB write on rank 3 (GPU3,
+layer 28) during a 256-token step of a ~250k-class context request that
+arrived seconds after startup. With the earlier sighting on the last rank
+(~323k prefill), wall 2 is position-triggered somewhere between ~128k and
+~250k. Working hypothesis: a 16384-stride int32 overflow (2^31 / 16384 =
+131072) — mHC-shaped or MLA-context-gather indexing. Safe cap lowered to
+131072; oversized requests now fail with a clean 400 instead of wedging
+the driver. Attribution data: the in-engine layer DIAG caught it at
+layer 28; the faulting kernel itself is still unidentified — reproduce
+with a single-proc decode/context-gather probe at >=150k before patching.

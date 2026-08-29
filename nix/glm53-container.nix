@@ -116,13 +116,13 @@
         "--pipeline-parallel-size 5"
         "--moe-backend humming"
         "--safetensors-load-strategy eager"
-        # 262144 = 2^18 working ceiling. Wall 1 (KDA/FLA int32 overflow,
-        # token*8192 > 2^31) is PATCHED (see fla/ overrides, probes pass 270k).
-        # Wall 2 remains: Xid 31 OOB write on the LAST rank (GPU4) during a
-        # ~323k-token prefill (2026-08-29) — second int32 site in the long
-        # prefill path, suspected MLA context-gather or another rank-4 kernel.
-        # Raise only after wall 2 is found and patched.
-        "--max-model-len 262144"
+        # 131072 = 2^17 SAFE ceiling. Wall 1 (KDA int32, patched, see fla/)
+        # fired >262144. Wall 2 (OPEN) fired again 2026-08-29 at ~250k-class
+        # context on the LAST and THIRD ranks (Xid 31 OOB writes, layer 28,
+        # 256-token step) — it is NOT avoided by the 262144 cap. Suspect a
+        # 16384-stride int32 overflow (2^31/16384 = 131072). Requests beyond
+        # the cap get a clean 400 instead of a driver wedge.
+        "--max-model-len 131072"
         # Split the model's always-on thinking (template auto-opens <think>)
         # into reasoning_content. NOTE: deepseek_r1, NOT glm47 — the fork's
         # glm47 reasoning adapter silently swallows thinking (never emits

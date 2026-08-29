@@ -67,7 +67,7 @@ exec "$ENGINE" run -d \
     --port 8000 \
     --pipeline-parallel-size 5 \
     --moe-backend humming \
-    --max-model-len 262144 \
+    --max-model-len 131072 \
     --reasoning-parser deepseek_r1 \
     --safetensors-load-strategy eager \
     --gpu-memory-utilization 0.92 \

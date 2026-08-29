@@ -6,8 +6,8 @@ Run [mbehr90/GLM-5.3-Flash-nvfp4](https://huggingface.co/mbehr90/GLM-5.3-Flash-n
 (GA100 / sm_80 / 64 GiB after unlock).
 
 The model's stock serving image (`vllm/vllm-openai:glm53-flash`) assumes
-Hopper-class GPUs and no pipeline parallelism. This repo carries the seven
-override files that make it run on Ampere with PP=5.
+Hopper-class GPUs and no pipeline parallelism. This repo carries the override
+files that make it run on Ampere with PP=5.
 
 **Measured on the reference machine (5× unlocked 170HX): ~43 tok/s
 single-stream decode, 32k context, ~0.5 s first token, ~20 min model load.**
@@ -68,7 +68,7 @@ curl http://localhost:8000/v1/chat/completions -H 'Content-Type: application/jso
 }'
 ```
 
-## The seven overrides
+## The overrides
 
 | File | Mounts over | Why |
 |---|---|---|
@@ -89,11 +89,25 @@ curl http://localhost:8000/v1/chat/completions -H 'Content-Type: application/jso
 - `--safetensors-load-strategy eager` — avoids mmap reads (BTRFS corruption);
   costs ~5 s/shard.
 - `--pipeline-parallel-size 5` — 45 decoder layers → 9 per rank.
-- `--max-model-len 49152` — the validated working ceiling (48k). Wall 2 (rank-agnostic
-   MLA-context faults above ~56-61k, see lab/NOTES.md) bounds it: (1) the KDA/FLA chunk kernels (`token*8192` offsets) — **patched** in `overrides/fla/`, probes pass at 270k; (2) an unidentified site on the last PP rank (Xid 31 OOB write during a ~323k-token prefill) — unpatched. Cap stays at 262144 until wall 2 is found. (Model max is 1M; MLA is compact:
-  only 11 attention layers carry latent KV). Caveat: with dense attention,
-  huge prompts prefill for hours (chunked at 8192 tok/step) and decode slows
-  to a crawl near the ceiling. Drop to 262144 for a saner operating range.
+- `--max-model-len 49152` — the validated working ceiling. Two context walls
+   found so far: (1) the KDA/FLA chunk kernels (`token*8192` int32 offsets) —
+   **patched** in `overrides/fla/`, probes pass at 270k; (2) "wall 2":
+   rank-agnostic Xid 31 (GRAPHICS FAULT_PDE/REGION_VIOLATION) faults at the
+   sparse-MLA layers during long chunked prefills — **unpatched**, bounded by
+   this cap. Bracketed empirically: 55.5k verified clean (live traffic plus a
+   20-turn agentic probe concurrently), ≥~61k crashes. Exonerated so far:
+   cudagraphs (reproduced under `--enforce-eager`), prefix caching, the DSA
+   indexer (this config runs dense MLA), and — standalone, bit-exact at block
+   size 4352 up to 131k — the whole MLA prefill pipeline: pool gather,
+   `kv_b_proj` GEMM, the Triton prefill kernel, LSE merge, chunk planner and
+   metadata builder. Raising the chunk budget (`--max-num-batched-tokens
+   8192`) moves the wall 60.7k → 69.6k (dies at exactly
+   `num_computed_tokens=69632`), i.e. the trigger scales with absolute
+   position — the same bug class as DeepSeek-V4's fp8 MQA-logits buffer, but
+   a different code path here. Full log in `lab/NOTES.md`. (Model max is 1M;
+   MLA is compact: only 11 attention layers carry latent KV.) Caveat: with
+   dense attention, huge prompts prefill for a long time (chunked at 2048
+   tok/step by default) and decode slows to a crawl near the ceiling.
 - `--reasoning-parser deepseek_r1` — the chat template auto-opens `<think>`
   and the model always reasons first; this routes thinking to
   `reasoning_content`. Use **deepseek_r1, not glm47**: this fork's glm47
@@ -103,6 +117,10 @@ curl http://localhost:8000/v1/chat/completions -H 'Content-Type: application/jso
   `<think>` (opening tag supplied by the prompt). The template also accepts a
   `reasoning_effort` chat kwarg (low/high/max, default max).
 - `--gpu-memory-utilization 0.92`, `--max-num-seqs 64`.
+- `VLLM_USE_BREAKABLE_CUDAGRAPH=0` (env) — the fork auto-enables an
+  experimental "breakable cudagraph" mode; rank 3 throws C++ exceptions
+  during piecewise-capture memory profiling with it on (PP=5, sm_80).
+  Keep it off.
 - `--enable-auto-tool-choice --tool-call-parser glm47` — required by agent
   harnesses sending `tool_choice: "auto"`; `glm47` is the GLM-family parser
   in this image (registered as `glm45`/`glm47`). If tool calls come out
@@ -117,16 +135,20 @@ curl http://localhost:8000/v1/chat/completions -H 'Content-Type: application/jso
 - **A GPU crash can wedge the driver**: nvidia-smi keeps looking healthy, but
   the next start fails `cudaSetDevice` (busy/unavailable or OOM) on the wedged
   GPU. Only a host reboot recovers — a restart-looping service is the tell.
-- The model emits reasoning-style text into `content`; wire a reasoning parser
-  if you want it split out.
+  After any crash, `dmesg | grep -ci xid` returning nonzero means the GPU is
+  still carrying the fault; don't trust a clean `nvidia-smi`.
 - On the reference NixOS box this stack displaces the DeepSeek-V4 and
   vision-serving services (they own overlapping GPUs).
 
 ## Lab
 
-`lab/` contains the single-process probes used to exonerate the marlin path
-during the crash investigation, plus `lab/NOTES.md` — the full root-cause log
-and the offline pre-repack upgrade path for Marlin-grade throughput.
+`lab/` holds the single-process probes (marlin repack/throughput, FLA int64
+correctness) and `lab/NOTES.md` — the full crash-attribution log: both context
+walls, the wall-2 bracketing runs (32k/48k/60k), the 8192-budget A/B, and the
+standalone exonerations of the MLA prefill pipeline (gather, `kv_b_proj` GEMM,
+Triton prefill kernel, LSE merge, chunk planner/metadata — bit-exact at block
+size 4352 up to 131k), plus the offline pre-repack upgrade path for
+Marlin-grade throughput.
 
 ## License
 

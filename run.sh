@@ -46,6 +46,7 @@ exec "$ENGINE" run -d \
   -e VLLM_WORKER_INIT_STAGGER_S=15 \
   -e VLLM_MARLIN_SCALES_ON_CPU=1 \
   -e TORCH_SHOW_CPP_STACKTRACES=1 \
+  -e VLLM_USE_BREAKABLE_CUDAGRAPH=0 \
   -v "${OVERRIDES}/gpu_worker_patched.py:/usr/local/lib/python3.12/dist-packages/vllm/v1/worker/gpu_worker.py:ro" \
   -v "${OVERRIDES}/marlin_f4_patched.py:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/layers/quantization/utils/marlin_utils_fp4.py:ro" \
   -v "${MODEL_DIR}:/model:ro" \

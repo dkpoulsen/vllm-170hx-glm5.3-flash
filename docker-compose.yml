@@ -22,6 +22,8 @@ services:
       - VLLM_WORKER_INIT_STAGGER_S=15
       - VLLM_MARLIN_SCALES_ON_CPU=1
       - TORCH_SHOW_CPP_STACKTRACES=1
+      # Fork auto-enables experimental breakable cudagraphs; unstable on PP=5/sm_80.
+      - VLLM_USE_BREAKABLE_CUDAGRAPH=0
     volumes:
       # Adjust to wherever the 191 GiB model lives:
       - /models/GLM-5.3-Flash-nvfp4:/model:ro

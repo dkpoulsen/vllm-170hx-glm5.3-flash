@@ -53,3 +53,23 @@ per-layer `prepare_nvfp4_moe_layer_for_marlin` single-process (proven clean,
 fast), save the marlin-format tensors, and patch the engine to load them
 instead of computing at startup — then only the (different) marlin GEMM
 kernels run at serve time.
+
+## Wall 2 — second int32 overflow (open, 2026-08-29)
+
+After the KDA patches (wall 1), a fresh engine run with max-model-len 1M
+crashed ~90 s into a ~323k-token prefill request:
+
+- Xid 31 on GPU4 (PCI 62:00) — the LAST PP rank (layers 36-44): MMU fault,
+  GRAPHICS engine, REGION_VIOLATION VIRT_WRITE — same OOB-write signature
+  as wall 1, different GPU/kernel.
+- The kernel-level KDA probe (`lab/probe_fla.py`) is clean at 270k, so this
+  site is in a different prefill-path kernel that only runs in-engine.
+- Suspects (unverified): the MLA context-chunk gather
+  (`ops.gather_and_maybe_dequant_cache` — paged-slot × 512 latent math),
+  another absolute-position kernel on the last rank, or an mHC tilelang op.
+- Method that worked for wall 1: kernel-level probe with
+  CUDA_LAUNCH_BLOCKING=1 for exact attribution, then int64-widen the index
+  products (and re-cast block-ptr shapes to int32 — Triton requires
+  `offsets/block_shape` int32 while strides/bases may be int64).
+- Working posture: `--max-model-len 262144` (below both walls; wall 1
+  patched anyway). Each in-engine failure costs a host reboot (driver wedge).

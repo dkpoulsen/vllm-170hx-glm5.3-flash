@@ -9,7 +9,7 @@
   # Image: vllm/vllm-openai:glm53-flash (arch Glm5NextForConditionalGeneration,
   # v0.1.dev20051+g487ecf187 — not in any released vLLM).
   #
-  # The fourteen bind-mounted override files under /opt/vllm-170hx-glm5.3-flash/overrides/
+  # The seven bind-mounted override files in /opt/vllm-170hx-glm5.3-flash/overrides/ are
   # REQUIRED — the stock image cannot run this model on sm_80 / with PP:
   #   model_patched.py            -> glm5next model.py: PP unlock
   #                                  (make_empty_intermediate_tensors with the
@@ -116,10 +116,13 @@
         "--pipeline-parallel-size 5"
         "--moe-backend humming"
         "--safetensors-load-strategy eager"
-        # 1M = model max. Safe again: the KDA/FLA prefill kernels were patched
-        # to int64 index math (see the fla/ overrides) — stock kernels
-        # overflowed int32 above 262144 tokens (Xid 31 MMU fault + wedge).
-        "--max-model-len 1048576"
+        # 262144 = 2^18 working ceiling. Wall 1 (KDA/FLA int32 overflow,
+        # token*8192 > 2^31) is PATCHED (see fla/ overrides, probes pass 270k).
+        # Wall 2 remains: Xid 31 OOB write on the LAST rank (GPU4) during a
+        # ~323k-token prefill (2026-08-29) — second int32 site in the long
+        # prefill path, suspected MLA context-gather or another rank-4 kernel.
+        # Raise only after wall 2 is found and patched.
+        "--max-model-len 262144"
         # Split the model's always-on thinking (template auto-opens <think>)
         # into reasoning_content. NOTE: deepseek_r1, NOT glm47 — the fork's
         # glm47 reasoning adapter silently swallows thinking (never emits

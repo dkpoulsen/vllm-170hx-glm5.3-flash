@@ -86,3 +86,41 @@ arrived seconds after startup. With the earlier sighting on the last rank
 the driver. Attribution data: the in-engine layer DIAG caught it at
 layer 28; the faulting kernel itself is still unidentified — reproduce
 with a single-proc decode/context-gather probe at >=150k before patching.
+
+## Wall 2 — full day of attribution (2026-08-29 evening)
+
+Threshold found empirically: contexts <= ~55.5k WORK, >= ~61k CRASH (Xid 31
+wild-pointer faults at MLA layers, GEMM victim; rank-agnostic — hit rank0
+layer 3 and rank3 layer 27). NOT fixed by --enforce-eager or disabling
+prefix caching (both still crashed) — cudagraphs and prefix cache are
+exonerated. Shipped config: cap 49152, graphs+prefix ON, breakable
+cudagraphs OFF, CUDA_LAUNCH_BLOCKING removed.
+
+Components individually exonerated by standalone probes (probe_mla_ctx.py,
+probe_mla_multiseq.py — all bit-exact vs references, no faults, sanitizer
+not needed): gather_and_maybe_dequant_cache (incl. engine page size 4352,
+fragmented pools, high page ids — int64-safe), kv_b_proj GEMM, custom
+Triton MLA prefill kernel (context + causal modes, ragged multi-seq),
+merge_attn_states, plan_mla_context_chunks + builder metadata (read clean;
+seq_lens_cpu_upper_bound is exact for prefill rows per its docstring).
+
+Key engine facts learned: attention block size padded to 4352 tokens to
+match mamba state pools ("Add 10 padding layers" hybrid KV layout across
+PP=5); fork defaults to 2048-token chunked-prefill budget; fork auto-enables
+experimental breakable cudagraphs (VLLM_USE_BREAKABLE_CUDAGRAPH=1) and rank3
+threw C++ exceptions during piecewise graph profiling — kept disabled.
+
+Remaining suspects (untested): engine-side integration of the gather with
+the hybrid 4352-page + padding-layer pool layout (e.g. per-layer block-id
+offsets vs padding slots), the KDA/mamba state pool seam at chunk
+boundaries, or a fork custom op beyond the gather. Next session: extend
+probes to the mamba state-pool layout, or bisect in-engine by masking
+context-chunk gathers (force small chunk budget via workspace override).
+
+Crash signature reference (5 crashes today): Xid 31 GRAPHICS
+FAULT_PDE/REGION_VIOLATION on the rank processing an MLA layer
+(27/28@rank3 x3, 3@rank0 x1, 27@rank3 x1); DIAG surfaces at the MLA
+layer's kv_b_proj cublasGemmEx or first op; one dual-GPU simultaneous
+fault pair (GPU0 read + GPU3 write). Every crash during chunked prefill
+of a long context; recovery = host reboot (GPU3 wedges at RM level,
+set_device retries fail).

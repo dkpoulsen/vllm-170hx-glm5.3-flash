@@ -79,6 +79,7 @@ curl http://localhost:8000/v1/chat/completions -H 'Content-Type: application/jso
 | `overrides/weight_utils_patched.py` | `.../model_loader/weight_utils.py` | safetensors iterator with a numpy-framework fallback for `get_tensor` (BTRFS mmap reads in workers occasionally return corrupt storages) |
 | `overrides/gpu_worker_patched.py` | `vllm/v1/worker/gpu_worker.py` | `set_device` retry + `VLLM_WORKER_INIT_STAGGER_S`: concurrent 5-worker CUDA context creation sporadically fails on this platform |
 | `overrides/marlin_f4_patched.py` | `.../quantization/utils/marlin_utils_fp4.py` | Marlin nvfp4 prep with the scale pipeline on CPU + flock + entry sync. **Inert while `--moe-backend humming`**; kept for when the marlin path is fixed (see `lab/NOTES.md`) |
+| `overrides/fla/*.py` (7 files) | `.../flash_linear_attention/ops/` | **int64 index math for the KDA prefill kernels** — the stock kernels overflow int32 above 262,144 tokens (`token × 8192` element offsets), crashing with Xid 31 (MMU fault, SM write) and wedging the driver. Patched: `cu_seqlens` loads (bos/eos), the `T` length cast, the absolute gate-row load, and the per-chunk h-state indexing. Validated bit-identical on short sequences; clean 270k-token run (see `lab/probe_fla.py`) |
 
 ## Serving flags that matter
 

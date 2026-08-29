@@ -1,21 +1,57 @@
 { config, lib, pkgs, ... }:
 
-# NixOS module: vLLM GLM-5.3-Flash-nvfp4, pipeline-parallel PP=5 across all
-# five CMP 170HX GPUs. Port 8000, model name "glm53flash".
-#
-# Import in configuration.nix:
-#   imports = [ ... ./vllm-170hx-glm5.3-flash/nix/glm53-container.nix ... ];
-#
-# Expects:
-#   - this repo checked out at /opt/vllm-170hx-glm5.3-flash (or adjust the
-#     override paths below)
-#   - the model at /models/GLM-5.3-Flash-nvfp4
-#     (hf download mbehr90/GLM-5.3-Flash-nvfp4 --local-dir /models/GLM-5.3-Flash-nvfp4)
-#   - podman + NVIDIA CDI device wiring (nvidia.com/gpu=all)
-#
-# NOTE: this unit owns GPUs 0-4. Disable conflicting GPU services
-# (e.g. dsv4-serve, vision stacks) before enabling it.
 {
+  # ---------------------------------------------------------------------------
+  # vLLM model server — GLM-5.3-Flash-nvfp4 (mbehr90, compressed-tensors
+  # NVFP4A16) serving on ALL 5 CMP 170HX GPUs with pipeline parallelism PP=5.
+  # Port 8000, model name "glm53flash", ~43 tok/s single-stream @ 32k ctx.
+  #
+  # Image: vllm/vllm-openai:glm53-flash (arch Glm5NextForConditionalGeneration,
+  # v0.1.dev20051+g487ecf187 — not in any released vLLM).
+  #
+  # The fourteen bind-mounted override files under /opt/vllm-170hx-glm5.3-flash/overrides/
+  # REQUIRED — the stock image cannot run this model on sm_80 / with PP:
+  #   model_patched.py            -> glm5next model.py: PP unlock
+  #                                  (make_empty_intermediate_tensors with the
+  #                                  hc-expanded [tokens, 4, hidden] residual),
+  #                                  mHC rank-boundary fix, dense-mode indexer
+  #                                  loader guards, flock-serialized loading.
+  #   overlay/config.json         -> /model/config.json overlay: index_topk=null
+  #                                  (kills the DSA sparse indexer -> dense MLA
+  #                                  via TRITON_MLA; sparse MLA is Hopper+).
+  #   overlay/triton_mla_prefill_sm80.py
+  #                                -> custom Triton ragged MLA prefill backend
+  #                                  (NoPE 256/0/256 dims; FA path is dims-
+  #                                  gated, FlashInfer/TRT-LLM are sm90/100).
+  #   selector_patched.py         -> MLA prefill selector: registers the CUSTOM
+  #                                  backend above, prefers it below sm90.
+  #   weight_utils_patched.py     -> safetensors iterator with numpy-framework
+  #                                  fallback (BTRFS mmap corruption guard).
+  #   gpu_worker_patched.py       -> set_device retry + worker init stagger
+  #                                  (concurrent 5-worker context creation is
+  #                                  flaky on this box).
+  #   marlin_f4_patched.py        -> marlin nvfp4 prep with CPU scale pipeline
+  #                                  + flock (INERT while --moe-backend
+  #                                  humming; needed if backend flips back).
+  #
+  # --moe-backend humming, not marlin: the nvfp4 marlin prep crashes with async
+  # illegal accesses inside the 5-worker engine (exonerated single-process —
+  # see the 170HX skill llm-stack.md). Suspected PCIe x4 link instability
+  # under 5-way load DMA (chronic AER Data-Link-Layer replay timeouts).
+  # Marlin-grade upgrade path: offline single-proc pre-repack + loader patch.
+  #
+  # GPU ownership: this unit needs GPUs 0-4. dsv4-serve (vllm-container.nix),
+  # qwen-ninfer + fusion-router (fusion.nix) have their wantedBy commented out
+  # while this stack owns the box. Restore those to swap back.
+  #
+  # WARNING: any GPU crash can wedge the RM driver (stuck memory scrubber,
+  # nvidia-smi still looks healthy) — only a host reboot recovers; the service
+  # will restart-loop uselessly until then.
+  #
+  # 2026-08-28: first boot of this module, ported from the validated ad-hoc
+  # launcher /root/glm53-nvfp4-work/launch-pp5.sh (kept as the lab copy).
+  # ---------------------------------------------------------------------------
+
   systemd.services.glm53-serve = {
     description = "vLLM GLM-5.3-Flash-nvfp4 PP5 container (all 5 CMP 170HX)";
     wants = [ "network-online.target" ];
@@ -60,6 +96,19 @@
         "-v /opt/vllm-170hx-glm5.3-flash/overrides/overlay/triton_mla_prefill_sm80.py:/usr/local/lib/python3.12/dist-packages/vllm/v1/attention/backends/mla/prefill/triton_mla_prefill_sm80.py:ro"
         "-v /opt/vllm-170hx-glm5.3-flash/overrides/selector_patched.py:/usr/local/lib/python3.12/dist-packages/vllm/v1/attention/backends/mla/prefill/selector.py:ro"
         "-v /opt/vllm-170hx-glm5.3-flash/overrides/weight_utils_patched.py:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/model_loader/weight_utils.py:ro"
+        # KDA/FLA prefill kernels with int64 index math — stock kernels
+        # overflow int32 above 262144 tokens (token*8192 element offsets),
+        # crashing with Xid 31 + driver wedge. Patched sites: cu_seqlens
+        # loads (bos/eos), T length cast, absolute gate row, per-chunk h-state
+        # indexing. Validated: short-run bit-identical to stock, 270k-token
+        # single-sequence run clean.
+        "-v /opt/vllm-170hx-glm5.3-flash/overrides/fla/kda.py:/usr/local/lib/python3.12/dist-packages/vllm/third_party/flash_linear_attention/ops/kda.py:ro"
+        "-v /opt/vllm-170hx-glm5.3-flash/overrides/fla/chunk_o.py:/usr/local/lib/python3.12/dist-packages/vllm/third_party/flash_linear_attention/ops/chunk_o.py:ro"
+        "-v /opt/vllm-170hx-glm5.3-flash/overrides/fla/chunk_delta_h.py:/usr/local/lib/python3.12/dist-packages/vllm/third_party/flash_linear_attention/ops/chunk_delta_h.py:ro"
+        "-v /opt/vllm-170hx-glm5.3-flash/overrides/fla/chunk_scaled_dot_kkt.py:/usr/local/lib/python3.12/dist-packages/vllm/third_party/flash_linear_attention/ops/chunk_scaled_dot_kkt.py:ro"
+        "-v /opt/vllm-170hx-glm5.3-flash/overrides/fla/cumsum.py:/usr/local/lib/python3.12/dist-packages/vllm/third_party/flash_linear_attention/ops/cumsum.py:ro"
+        "-v /opt/vllm-170hx-glm5.3-flash/overrides/fla/solve_tril.py:/usr/local/lib/python3.12/dist-packages/vllm/third_party/flash_linear_attention/ops/solve_tril.py:ro"
+        "-v /opt/vllm-170hx-glm5.3-flash/overrides/fla/wy_fast.py:/usr/local/lib/python3.12/dist-packages/vllm/third_party/flash_linear_attention/ops/wy_fast.py:ro"
         "docker.io/vllm/vllm-openai:glm53-flash"
         "/model"
         "--served-model-name glm53flash"
@@ -67,17 +116,21 @@
         "--pipeline-parallel-size 5"
         "--moe-backend humming"
         "--safetensors-load-strategy eager"
-        # 1M = max_position_embeddings of the model (true maximum). Dense
-        # attention: prefill of huge prompts is slow (chunked at 8192 tok/step)
-        # and decode slows near the ceiling.
+        # 1M = model max. Safe again: the KDA/FLA prefill kernels were patched
+        # to int64 index math (see the fla/ overrides) — stock kernels
+        # overflowed int32 above 262144 tokens (Xid 31 MMU fault + wedge).
         "--max-model-len 1048576"
         # Split the model's always-on thinking (template auto-opens <think>)
-        # into reasoning_content. glm47 parser starts in REASONING state and
-        # switches on </think> — matches this template exactly.
+        # into reasoning_content. NOTE: deepseek_r1, NOT glm47 — the fork's
+        # glm47 reasoning adapter silently swallows thinking (never emits
+        # reasoning_content, drops unterminated reasoning on truncation);
+        # deepseek_r1 explicitly handles output that starts already inside
+        # <think> (opening tag in the prompt), streaming reasoning deltas
+        # until </think>. Staged 2026-08-28; applies at next rebuild/restart.
         "--reasoning-parser deepseek_r1"
         "--gpu-memory-utilization 0.92"
         "--max-num-seqs 64"
-        # Agent harnesses send tool_choice=auto — rejected without these.
+        # Agent harnesses (dsh) send tool_choice=auto — rejected without these.
         # glm47 = Glm47MoeModelToolParser, the GLM-family tool format in this
         # fork (registered as glm45/glm47).
         "--enable-auto-tool-choice"

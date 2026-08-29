@@ -26,6 +26,7 @@ fi
 
 VLLM_PY=/usr/local/lib/python3.12/dist-packages/vllm/models/glm5next/nvidia/model.py
 PREFILL_DIR=/usr/local/lib/python3.12/dist-packages/vllm/v1/attention/backends/mla/prefill
+FLA_DIR=/usr/local/lib/python3.12/dist-packages/vllm/third_party/flash_linear_attention/ops
 
 "$ENGINE" rm -f "$CONTAINER_NAME" >/dev/null 2>&1 || true
 
@@ -53,6 +54,13 @@ exec "$ENGINE" run -d \
   -v "${OVERRIDES}/overlay/triton_mla_prefill_sm80.py:${PREFILL_DIR}/triton_mla_prefill_sm80.py:ro" \
   -v "${OVERRIDES}/selector_patched.py:${PREFILL_DIR}/selector.py:ro" \
   -v "${OVERRIDES}/weight_utils_patched.py:/usr/local/lib/python3.12/dist-packages/vllm/model_executor/model_loader/weight_utils.py:ro" \
+  -v "${OVERRIDES}/fla/kda.py:${FLA_DIR}/kda.py:ro" \
+  -v "${OVERRIDES}/fla/chunk_o.py:${FLA_DIR}/chunk_o.py:ro" \
+  -v "${OVERRIDES}/fla/chunk_delta_h.py:${FLA_DIR}/chunk_delta_h.py:ro" \
+  -v "${OVERRIDES}/fla/chunk_scaled_dot_kkt.py:${FLA_DIR}/chunk_scaled_dot_kkt.py:ro" \
+  -v "${OVERRIDES}/fla/cumsum.py:${FLA_DIR}/cumsum.py:ro" \
+  -v "${OVERRIDES}/fla/solve_tril.py:${FLA_DIR}/solve_tril.py:ro" \
+  -v "${OVERRIDES}/fla/wy_fast.py:${FLA_DIR}/wy_fast.py:ro" \
   vllm/vllm-openai:glm53-flash \
   /model \
     --served-model-name glm53flash \

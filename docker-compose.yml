@@ -28,6 +28,15 @@ services:
       # Dense-MLA config overlay (index_topk=null) — must sit on top of the
       # model directory:
       - ./overrides/overlay/config.json:/model/config.json:ro
+      # KDA/FLA prefill kernels with int64 index math (stock kernels overflow
+      # int32 above 262144 tokens → Xid 31 crash + driver wedge):
+      - ./overrides/fla/kda.py:/usr/local/lib/python3.12/dist-packages/vllm/third_party/flash_linear_attention/ops/kda.py:ro
+      - ./overrides/fla/chunk_o.py:/usr/local/lib/python3.12/dist-packages/vllm/third_party/flash_linear_attention/ops/chunk_o.py:ro
+      - ./overrides/fla/chunk_delta_h.py:/usr/local/lib/python3.12/dist-packages/vllm/third_party/flash_linear_attention/ops/chunk_delta_h.py:ro
+      - ./overrides/fla/chunk_scaled_dot_kkt.py:/usr/local/lib/python3.12/dist-packages/vllm/third_party/flash_linear_attention/ops/chunk_scaled_dot_kkt.py:ro
+      - ./overrides/fla/cumsum.py:/usr/local/lib/python3.12/dist-packages/vllm/third_party/flash_linear_attention/ops/cumsum.py:ro
+      - ./overrides/fla/solve_tril.py:/usr/local/lib/python3.12/dist-packages/vllm/third_party/flash_linear_attention/ops/solve_tril.py:ro
+      - ./overrides/fla/wy_fast.py:/usr/local/lib/python3.12/dist-packages/vllm/third_party/flash_linear_attention/ops/wy_fast.py:ro
     command: >
       /model
       --served-model-name glm53flash

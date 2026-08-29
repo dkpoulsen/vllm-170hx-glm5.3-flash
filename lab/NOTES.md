@@ -124,3 +124,19 @@ layer's kv_b_proj cublasGemmEx or first op; one dual-GPU simultaneous
 fault pair (GPU0 read + GPU3 write). Every crash during chunked prefill
 of a long context; recovery = host reboot (GPU3 wedges at RM level,
 set_device retries fail).
+
+## Wall 2 — 8192 chunk-budget A/B (2026-08-29 night)
+
+User-requested experiment: --max-num-batched-tokens 8192 (vs fork default
+2048). RESULT: wall moved but persists — the 60k provoke (initial prefill
+60.7k + turns) survived to 69.5k and crashed at EXACTLY
+num_computed_tokens=69632 scheduling 9 tokens (VllmWorker-0 died, Xid 31
+READ fault PDE on GPU0; engine dump_input captured the scheduler state).
+So: 2048 budget -> wall ~60.7k; 8192 budget -> wall ~69.6k. The trigger
+is absolute-position/chunk-phase dependent, NOT chunk-size dependent —
+consistent with an indexing product (position x ~30k-class stride, or
+position-dependent pool offset) wrapping int32 only for certain phases.
+Reverted to the validated 49152 cap. Next root-cause idea: the engine's
+own dump_input.py output shows num_common_prefix_blocks + per-group
+new_block_ids — capture a few of these at crash to correlate block-id
+magnitudes with the fault (block-id x 4352 x 512 x slots overflow?).

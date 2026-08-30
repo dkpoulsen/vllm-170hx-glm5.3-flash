@@ -150,6 +150,27 @@ Triton prefill kernel, LSE merge, chunk planner/metadata — bit-exact at block
 size 4352 up to 131k), plus the offline pre-repack upgrade path for
 Marlin-grade throughput.
 
+## Alternative: vowstar/vllm-sm80 (1M context)
+
+An independent sm_80 fork, [vowstar/vllm-sm80](https://github.com/vowstar/vllm-sm80)
+(branch `glm53-sm80`), runs this model on identical hardware with a different
+serving shape: sparse MLA (DSA indexer) via a Triton sm_80 kernel, fp8 latent
+KV, marlin W4A16 MoE, and their own prefix-caching fixes. `run-sm80.sh`
+launches it after a one-time source build (~2 h):
+
+```bash
+cd /tmp/vllm-sm80 && podman build \
+  --build-arg torch_cuda_arch_list="8.0" --build-arg max_jobs=40 \
+  -t vllm-sm80:latest -f docker/Dockerfile .
+systemctl stop glm53-serve && ./run-sm80.sh
+```
+
+Validated on the reference rig: **1,048,576-token context with zero Xids**
+(wall 2 does not exist in this stack), ~95 s model load, 7.49M-token KV pool,
+~44 tok/s decode without MTP. Caveat: MTP speculative decoding is incompatible
+with the mbehr90 checkpoint's unquantized draft layer under `--moe-backend
+marlin` — see `lab/NOTES.md`.
+
 ## License
 
 MIT. The model is MIT-licensed (see its card); vLLM is Apache-2.0.

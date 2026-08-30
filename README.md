@@ -173,12 +173,12 @@ systemctl stop glm53-serve && ./run-sm80.sh
 ```
 
 Validated on the reference rig: **1,048,576-token context with zero Xids**
-(wall 2 does not exist in this stack), ~95 s model load, 7.49M-token KV pool,
-~44 tok/s decode without MTP. Reasoning is split into a nonstandard
-`reasoning` field (not `reasoning_content`). Caveat: MTP speculative decoding
-is incompatible with the mbehr90 checkpoint's unquantized draft layer under
-`--moe-backend marlin` — see `lab/NOTES.md`. On NixOS, run it as a service via
-`nix/glm53-sm80-container.nix` (unit `glm53-sm80-serve`, the default GLM
+(wall 2 does not exist in this stack), ~95 s model load, 6.67M-token KV pool,
+and — after re-quantizing the checkpoint's bf16 MTP draft layer to nvfp4
+(`lab/NOTES.md`) — **MTP x3 speculative decoding at 94% acceptance, ~70-93
+tok/s** single-stream decode. Reasoning is split into a nonstandard
+`reasoning` field (not `reasoning_content`). On NixOS, run it as a service
+via `nix/glm53-sm80-container.nix` (unit `glm53-sm80-serve`, the default GLM
 stack; conflicts with `glm53-serve`).
 
 ## License

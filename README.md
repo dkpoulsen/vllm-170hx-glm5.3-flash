@@ -50,13 +50,20 @@ top of the model directory.
 ### NixOS
 
 ```nix
-# configuration.nix
-imports = [ /path/to/this/repo/nix/glm53-container.nix ];
+# configuration.nix — the sm80 stack is the default (1M context):
+imports = [
+  /path/to/this/repo/nix/glm53-sm80-container.nix   # glm53-sm80-serve
+  /path/to/this/repo/nix/glm53-container.nix        # glm53-serve (opt-in fallback)
+];
 ```
 
 Expects this repo at `/opt/vllm-170hx-glm5.3-flash` and the model at
-`/models/GLM-5.3-Flash-nvfp4` (adjust paths in the module otherwise).
-This unit owns **all five GPUs** — disable conflicting GPU services first.
+`/models/GLM-5.3-Flash-nvfp4` (adjust paths in the modules otherwise), plus
+the `vllm-sm80:latest` image built once (see above). The two units
+`Conflicts=` with each other — `systemctl start glm53-serve` stops
+`glm53-sm80-serve` automatically and vice versa; only the sm80 unit is
+enabled at boot. Either unit owns **all five GPUs** — disable conflicting
+GPU services first.
 
 ### Use it
 
@@ -167,9 +174,12 @@ systemctl stop glm53-serve && ./run-sm80.sh
 
 Validated on the reference rig: **1,048,576-token context with zero Xids**
 (wall 2 does not exist in this stack), ~95 s model load, 7.49M-token KV pool,
-~44 tok/s decode without MTP. Caveat: MTP speculative decoding is incompatible
-with the mbehr90 checkpoint's unquantized draft layer under `--moe-backend
-marlin` — see `lab/NOTES.md`.
+~44 tok/s decode without MTP. Reasoning is split into a nonstandard
+`reasoning` field (not `reasoning_content`). Caveat: MTP speculative decoding
+is incompatible with the mbehr90 checkpoint's unquantized draft layer under
+`--moe-backend marlin` — see `lab/NOTES.md`. On NixOS, run it as a service via
+`nix/glm53-sm80-container.nix` (unit `glm53-sm80-serve`, the default GLM
+stack; conflicts with `glm53-serve`).
 
 ## License
 

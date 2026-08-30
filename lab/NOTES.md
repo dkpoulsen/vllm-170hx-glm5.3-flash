@@ -178,8 +178,9 @@ Validated on our rig (all with dmesg Xid count 0 throughout):
   1M cold prefill 205 s, cached appends 7 s/turn. WALL 2 DOES NOT EXIST
   in this stack — 1M context (the model max) serves.
 - Single-stream decode ~44 tok/s idle (no MTP); ~16 tok/s while a 1M-
-  context request decodes concurrently. glm47 reasoning parser still
-  leaves reasoning_content empty (same as stock); content is clean.
+  context request decodes concurrently. glm47 reasoning parser DOES split
+  thinking here — under a nonstandard "reasoning" key (not
+  reasoning_content); content is clean either way.
 
 Operational: `./run-sm80.sh` (stops nothing by itself — stop glm53-serve
 first: `systemctl stop glm53-serve`). Switch back with

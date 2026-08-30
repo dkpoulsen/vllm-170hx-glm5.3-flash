@@ -7,12 +7,13 @@
   # Serving on ALL 5 CMP 170HX GPUs, PP=5, port 8000, model "glm53flash".
   #
   # This is the PREFERRED stack (2026-08-30): 1,048,576-token context with
-  # zero Xids (wall 2 does not exist here), ~95 s model load, 7.49M-token
-  # KV pool, ~44 tok/s decode. Replaces the stock-image stack in
+  # zero Xids (wall 2 does not exist here), ~95 s model load, 6.67M-token KV
+  # pool (MTP mode), MTP x3 spec decode at ~53% acceptance (~70-79 tok/s
+  # single-stream decode). Replaces the stock-image stack in
   # glm53-container.nix (kept as opt-in fallback, 49152 cap).
   #
   # One-time image build (~2 h on 64 cores, see repo run-sm80.sh header):
-  #   cd /tmp/vllm-sm80 && podman build \
+  #   cd /root/vllm-sm80 && podman build \
   #     --build-arg torch_cuda_arch_list="8.0" --build-arg max_jobs=40 \
   #     -t vllm-sm80:latest -f docker/Dockerfile .
   #
@@ -25,12 +26,18 @@
   # Gotchas baked into the flags below:
   #   - image entrypoint already execs `vllm serve` -> CMD is `/model ...`
   #   - VLLM_PREFIX_CACHE_RETENTION_INTERVAL must be a multiple of OUR
-  #     scheduler_block_size 8704 (their README's 143360 assumes 8960)
-  #     -> 139264 = 16 x 8704
-  #   - NO MTP spec decode: the mbehr90 checkpoint stores the layer-45
-  #     draft experts UNQUANTIZED -> UnquantizedFusedMoEMethod rejects
-  #     moe_backend=marlin at draft init on PP4. (Their ~100 tok/s decode
-  #     needs MTP; ours ~44 tok/s.)
+  #     scheduler_block_size. WITHOUT MTP it computes 8704 -> 139264; WITH
+  #     MTP x3 it computes 8960 -> use 143360 (16 pages, the upstream value).
+  #   - MTP x3 needs the layer-45 draft experts QUANTIZED to nvfp4: the
+  #     mbehr90 checkpoint ships them bf16 (blanket ignore on layer 45) and
+  #     UnquantizedFusedMoEMethod rejects moe_backend=marlin. Fixed
+  #     2026-08-30 by /opt/vllm-170hx-glm5.3-flash/lab/quantize_mtp_draft.py: 288
+  #     experts x 3 proj re-quantized into model-00048-draft-nvfp4.safetensors
+  #     (packed U8 + e4m3 block scales + RECIPROCAL global scale, matching
+  #     mbehr90's format), stale bf16 copies purged from shards 00000-00004,
+  #     index + quantization_config.ignore rewritten (backups *.bak-mtpquant).
+  #     Result: ~53% draft acceptance, mean length 2.6, decode ~70-79 tok/s
+  #     (was 44 without MTP), greedy output still exact.
   #   - VLLM_MARLIN_REPACK_HOLDOFF is flagged unknown by this build but is
   #     the upstream recommendation against a load-time MMU fault; inert
   #     here, kept for safety.
@@ -78,8 +85,9 @@
         # Even layer split by checkpoint BYTES (11,9,9,9,7): the last rank
         # also carries lm_head and the MTP draft layer.
         "-e VLLM_PP_LAYER_PARTITION=11,9,9,9,7"
-        # 16 mamba-aligned pages of OUR scheduler_block_size 8704 (fp8 KV).
-        "-e VLLM_PREFIX_CACHE_RETENTION_INTERVAL=139264"
+        # 16 mamba-aligned pages of the MTP-mode scheduler_block_size 8960
+        # (fp8 KV). Without --speculative-config this must be 139264 instead.
+        "-e VLLM_PREFIX_CACHE_RETENTION_INTERVAL=143360"
         "-e VLLM_MARLIN_REPACK_HOLDOFF=1"
         "-v /models/GLM-5.3-Flash-nvfp4:/model:ro"
         "localhost/vllm-sm80:latest"
@@ -108,6 +116,11 @@
         "--enable-auto-tool-choice"
         "--tool-call-parser glm47"
         "--moe-backend marlin"
+        # MTP x3 speculative decoding (needs the quantized draft, see above):
+        # ~53% acceptance, mean length 2.6, decode ~70-79 tok/s. The inner
+        # \\\" render as \" in the unit so systemd's ExecStart parser keeps
+        # the JSON quotes (plain " would be stripped and argparse dies).
+        "--speculative-config {\\\"method\\\":\\\"mtp\\\",\\\"num_speculative_tokens\\\":3}"
       ];
       ExecStop = "${pkgs.podman}/bin/podman stop --ignore -t 10 --cidfile=/run/glm53-sm80-serve.ctr-id";
       ExecStopPost = "${pkgs.podman}/bin/podman rm -f --ignore -t 10 --cidfile=/run/glm53-sm80-serve.ctr-id";

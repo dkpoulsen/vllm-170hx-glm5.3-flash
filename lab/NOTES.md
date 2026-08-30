@@ -185,3 +185,46 @@ Validated on our rig (all with dmesg Xid count 0 throughout):
 Operational: `./run-sm80.sh` (stops nothing by itself — stop glm53-serve
 first: `systemctl stop glm53-serve`). Switch back with
 `podman rm -f glm53-sm80 && systemctl start glm53-serve`.
+
+## MTP x3 unlocked: layer-45 draft experts re-quantized to nvfp4 (2026-08-30)
+
+The mbehr90 checkpoint blanket-ignores layer 45 (re:.*\.layers\.45\..*), so
+the MTP draft's 288 routed experts shipped bf16 -> UnquantizedFusedMoEMethod
+rejects --moe-backend marlin at draft init on PP4. Fixed by quantizing them
+offline to the checkpoint's own nvfp4 format (lab/quantize_mtp_draft.py +
+purge_stale_draft_experts.py, kept in /root/glm53-nvfp4-work/ on the box):
+
+1. Derived the exact format from the fork's dequant kernel
+   (nvfp4_emulation_utils): packed U8 [out, in/2] low-nibble=even;
+   scale e4m3 [out, in/16]; dequant = e2m1 * scale * global.
+   scale = block_amax/(6*gs), gs = tensor_amax/(448*6). Validated: scale
+   bytes reproduce mbehr90's bit-exactly on a requantized layer-3 reference,
+   nibbles 96.6% (tie-breaking noise).
+2. GOTCHA #1: weight_global_scale is stored RECIPROCAL (2688/amax) — the
+   runtime inverts it (process_weights_after_loading). Storing gs directly
+   made the draft output garbage: marlin gave 0.000 acceptance, emulation
+   33% (partial because... inverted scales), reciprocal fixed both.
+3. GOTCHA #2: vLLM's safetensors iterator yields ALL tensors in each shard
+   file — the stale bf16 expert copies in shards 00000-00004 had to be
+   physically purged or the MTP loader KeyErrors on w2_weight.
+4. GOTCHA #3: fresh shards written by the llmc venv python get mode 0600 —
+   safe_open fails inside the container with a MISLEADING FileNotFoundError
+   (it is EACCES). chmod 644 required.
+5. GOTCHA #4: with MTP on, scheduler_block_size computes 8960 (not 8704) ->
+   VLLM_PREFIX_CACHE_RETENTION_INTERVAL=143360 (139264 without MTP).
+6. GOTCHA #5 (nix): systemd ExecStart strips unescaped double quotes — the
+   speculative-config JSON needs \\\" escaping or argparse dies (exit 2).
+
+Result (systemd glm53-sm80-serve, marlin + MTP x3 + fp8 KV + 1M ctx):
+acceptance 94.4% (per-position 0.99/0.96/0.89), mean acceptance length 3.83,
+decode 71-93 tok/s single-stream greedy (was 44 without MTP), zero Xids,
+greedy output still exactly target-verified. KV pool 6.67M tokens.
+
+DFlash2 (incoai/GLM-5.3-Flash-DFlash2, 1B qwen3-style drafter): NOT runnable
+on PP5 — needs target hidden states at layers 5/14/24/33/42 (interior to all
+ranks) and Glm5NextForCausalLM lacks the SupportsEagle3 aux-tap interface;
+the fork hard-rejects dflash+PP (model_runner.py:265). A port would need
+cross-rank aux-hidden-state plumbing through IntermediateTensors. Draft
+downloaded to /models/GLM-5.3-Flash-DFlash2; a speculative.py carve-out
+(removes the SupportsPP draft interface check for dflash only) sits in
+/etc/nixos/glm53-sm80-overrides/ if that port ever happens.

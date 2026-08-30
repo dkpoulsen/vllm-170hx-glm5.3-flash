@@ -40,7 +40,7 @@ exec "$ENGINE" run -d \
   -e NCCL_P2P_DISABLE=1 \
   -e TORCH_SHOW_CPP_STACKTRACES=1 \
   -e VLLM_PP_LAYER_PARTITION=11,9,9,9,7 \
-  -e VLLM_PREFIX_CACHE_RETENTION_INTERVAL="${VLLM_PREFIX_CACHE_RETENTION_INTERVAL:-139264}" \
+  -e VLLM_PREFIX_CACHE_RETENTION_INTERVAL="${VLLM_PREFIX_CACHE_RETENTION_INTERVAL:-143360}" \
   -e VLLM_MARLIN_REPACK_HOLDOFF=1 \
   -v "${MODEL_DIR}:/model:ro" \
   vllm-sm80:latest \
@@ -60,6 +60,6 @@ exec "$ENGINE" run -d \
     --enable-auto-tool-choice \
     --tool-call-parser glm47 \
     --moe-backend marlin \
-    ${SPEC_MTP:+--speculative-config '{"method":"mtp","num_speculative_tokens":3}'}
+    --speculative-config '{"method":"mtp","num_speculative_tokens":3}'
 
 echo "container: ${CONTAINER_NAME} — follow: ${ENGINE} logs -f ${CONTAINER_NAME}"

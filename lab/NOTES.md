@@ -140,3 +140,47 @@ Reverted to the validated 49152 cap. Next root-cause idea: the engine's
 own dump_input.py output shows num_common_prefix_blocks + per-group
 new_block_ids — capture a few of these at crash to correlate block-id
 magnitudes with the fault (block-id x 4352 x 512 x slots overflow?).
+
+## Alternative stack: vowstar/vllm-sm80 (2026-08-30)
+
+Tried the glm53-sm80 branch of github.com/vowstar/vllm-sm80 — an
+independent sm_80 fork developed on identical hardware (5x CMP 170HX,
+PP5, driver 610.43.x). Completely different serving shape from ours:
+sparse MLA (DSA indexer, index_topk=2048 from the stock config) via a
+Triton sm_80 kernel, fp8 e4m3 latent KV (software dequant in-kernel),
+marlin W4A16 MoE, their own prefix-caching fixes. No overlays needed.
+
+Build (64-core box, ~2 h, 1.4 TB free disk):
+  cd /root/vllm-sm80 && podman build \
+    --build-arg torch_cuda_arch_list="8.0" --build-arg max_jobs=40 \
+    -t vllm-sm80:latest -f docker/Dockerfile .
+(default max_jobs=2 is glacial; default arch list builds 7 variants)
+
+Launch fixes vs the upstream README run command:
+1. Image entrypoint already execs `vllm serve` — pass `/model ...` as
+   CMD, NOT `vllm serve /model ...` (argparse rejects the duplicate).
+2. `VLLM_PREFIX_CACHE_RETENTION_INTERVAL` must be a multiple of OUR
+   scheduler_block_size. Their README says 143360 (16 pages of 8960) but
+   our run computes scheduler_block_size 8704 (layer partition/draft
+   differences) -> use 139264 (16 x 8704). Error is explicit about it.
+3. MTP x3 spec decode + `--moe-backend marlin` is INCOMPATIBLE with the
+   mbehr90 checkpoint: layer-45 draft experts are stored UNQUANTIZED
+   (plain `mlp.experts.N.*_proj.weight`, no nvfp4 packing) ->
+   UnquantizedFusedMoEMethod rejects moe_backend='marlin' on PP4 at
+   draft init. Either drop --speculative-config (what run-sm80.sh does;
+   SPEC_MTP=1 re-enables) or switch --moe-backend triton. vowstar's own
+   checkpoint presumably quantizes the draft.
+
+Validated on our rig (all with dmesg Xid count 0 throughout):
+- 95 s weight load per rank (vs 20 min serialized on the stock stack)
+- KV pool 7,490,963 tokens (fp8) vs 3.9M (bf16) on the old stack
+- provoke_sized: 76k, 131k, 262k, 524k, 1,039k-token prompts ALL CLEAN;
+  1M cold prefill 205 s, cached appends 7 s/turn. WALL 2 DOES NOT EXIST
+  in this stack — 1M context (the model max) serves.
+- Single-stream decode ~44 tok/s idle (no MTP); ~16 tok/s while a 1M-
+  context request decodes concurrently. glm47 reasoning parser still
+  leaves reasoning_content empty (same as stock); content is clean.
+
+Operational: `./run-sm80.sh` (stops nothing by itself — stop glm53-serve
+first: `systemctl stop glm53-serve`). Switch back with
+`podman rm -f glm53-sm80 && systemctl start glm53-serve`.
